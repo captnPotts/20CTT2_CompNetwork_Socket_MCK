@@ -1,5 +1,9 @@
 import socket
 import threading
+from tkinter import *
+from functools import partial
+import sys
+from GetApi import getAPI
 
 ## Prepare the data
 sizeOfLong = 64
@@ -8,26 +12,48 @@ localIP = socket.gethostbyname(socket.gethostname())
 ## ở đây socket.gethostname() sẽ trả về têm của PC, còn socket.gethostbyname() sẽ trả về local IP của tên máy
 # cân nhắc sử dụng cách này thay vì sử dụng một hằng số
 
-## Data structures to make the program runs smoothly
-## array để lưu index của các clients
-def getIndexConnections(connection,address):
-    for i in range(0,len(connectionArray)):
-        if connectionArray[i] == (connection,address):
-            return i
 
-
-
-connectionArray = [] ## Socket object
-
+logRecords_string = "" ## Chuỗi dùng để lưu các records của các users
+isLoginError = False
+global setExit
+setExit = False
 
 ## construct object Socket
 server = socket.socket(socket.AF_INET, socket.SOCK_STREAM) ## lệnh cơ bản trong socket python
 server.bind((localIP,portGate))
 
+## Data structures to make the program runs smoothly
+## array để lưu index của các clients
+connectionArray = [] ## Socket object
+def getIndexConnections(connection,address):
+    for i in range(0,len(connectionArray)):
+        if connectionArray[i] == (connection,address):
+            return i
 
-def handleInvidualThread(connection, address):
+def deleteIndexConnections(connection,address):
+    for i in range(0,len(connectionArray)):
+        if connectionArray[i] == (connection,address):
+            connectionArray.pop(i)
+            break
+
+
+def receiveUsernameAndPassword(connection,address):
+    usernameSize = connection.recv(1024).decode("utf-8")
+    username = ""
+    if usernameSize != '':
+        usernameSize = int(usernameSize)
+        username = connection.recv(usernameSize).decode("utf-8")
+    passwordSize = connection.recv(1024).decode("utf-8")
+    password = ""
+    if passwordSize != '':
+        passwordSize = int(passwordSize)
+        password = connection.recv(passwordSize).decode("utf-8")
+    user = (username,password)
+    return user
+
+
+def handleInvidualThread(connection, address): ## Hàm để xử lý từng luồng khác nhau của các client, nói chung việc gửi nhận dữ liệu sẽ thực hiện ở đây
     indexConnection = getIndexConnections(connection,address) + 1
-    print("Kết nối ", indexConnection ," đã được liên kết")
     while True:
         ## Một pakage gửi đi từ client sẽ mang hai thông tin:
         ## Số byte trong thông tin đó
@@ -37,23 +63,119 @@ def handleInvidualThread(connection, address):
         if messageSize != '': ## Khi mà không nhận được message gì
             messageSize = int(messageSize)
             message = connection.recv(messageSize).decode("utf-8")
-            print("Máy ", indexConnection ," muốn nói rằng: ",message)
-            if message == "DISCONNECT":
-                break
+            if message == "LOGIN_REQUEST":
+                user = receiveUsernameAndPassword(connection,address)
+                print(user)
+
+
+
+
+
+    deleteIndexConnections(connection,address) ## Làm xong thì xóa phần tử trong mảng này đi
     connection.close()
     print("Bye bye !")
 
+
+
+
+def ExitServer():
+    server.close()
+    tk.destroy()
+    setExit = True
+
 def init():
+    Server_text.configure(text = "Server đang chạy !")
     server.listen()
-    while True:
-        connection,address = server.accept() ## Nhận kết nối từ client và trả về connection
-        connectionArray.append((connection,address))
-        ## Ta có được connection kiểu trả về sẽ là một object kiểu Socket, vì thế khi truyền lên hàm handleInvidualThread
-        ## thì sẽ là một biến mang kiểu đối tượng Socket
-        thread = threading.Thread(target=handleInvidualThread, args=(connection,address)) ## Chia từng connection thành từng luồng khác nhau
-        thread.start()
-        print("SỐ CLIENT ĐANG HOẠT ĐỘNG: ",threading.active_count() -1)
+    global setExit
+    try:
+        while True:
+            connection,address = server.accept() ## Nhận kết nối từ client và trả về connection
+            connectionArray.append((connection,address))
+            ## Ta có được connection kiểu trả về sẽ là một object kiểu Socket, vì thế khi truyền lên hàm handleInvidualThread
+            ## thì sẽ là một biến mang kiểu đối tượng Socket
+            thread = threading.Thread(target=handleInvidualThread, args=(connection,address)) ## Chia từng connection thành từng luồng khác nhau
+            thread.start()
+            global logRecords_string ## chỗ này phải gọi biến global này ra để có thể cập nhật được log
+            logRecords_string += "\n Máy " + str(getIndexConnections(connection,address) +1) +" đã kết nối"
+            log_records.config(text = logRecords_string)
+    except:
+            return
 
 
-print("Khởi động server")
-init()
+def initThreading():
+    startServer = threading.Thread(target=init)
+    startServer.start()
+
+def hideLoginFrames(): ##Xóa các widgets Tkinter của phần login
+    global isLoginError
+    usernameLabel.pack_forget()
+    usernameEntry.pack_forget()
+    passwordLabel.pack_forget()
+    passwordEntry.pack_forget()
+    loginButton.pack_forget()
+    Server_text.pack_forget()
+    if isLoginError == True:
+        loginError.pack_forget()
+
+def usersAction():
+    Active_users_text = Label(tk,text = "Active Users")
+    global log_records
+    log_records = Label(tk,text =logRecords_string, padx = 200, pady = 80) ## Đây là object để hiện lên các dòng lịch sử đăng nhập các kiểu của các clients
+    exitButton = Button(tk,text = "exit", padx = 100, pady = 50, command = ExitServer)
+    Active_users_text.pack()
+    log_records.pack()
+    exitButton.pack()
+    initThreading()
+
+
+def validateLogin(username,password):
+    global isLoginError
+    username_get = username.get()
+    password_get = password.get()
+    if username_get == "admin" and password_get == "123456": ## Ở đây sẽ là check liệu pass + username có nằm trong DB không
+        hideLoginFrames()
+        usersAction()
+    else:
+        if isLoginError:
+            pass ## Do nothing
+        else:
+            loginError.pack()
+            isLoginError = True
+
+
+
+## MAIN starts here ##
+tk = Tk()
+tk.geometry("400x500")
+Server_text = Label(tk,text = "Đăng nhập vào server")
+##exitButton = Button(tk,text = "exit", padx = 100, pady = 50, command = setExitTrue)
+##initButton = Button(tk,text = "init", padx = 100, pady = 50, command = initCommand)
+##testButton = Button(tk,text = "forget",padx = 100, pady = 50, command = hideAllFrames)
+Server_text.pack()
+##exitButton.pack()
+##initButton.pack()
+##testButton.pack()
+
+##userName label
+usernameLabel = Label(tk,text ="Username: ")
+username = StringVar()
+usernameEntry = Entry(tk, textvariable = username)
+
+ ##passWord Label
+passwordLabel = Label(tk,text="Password")
+password = StringVar()
+passwordEntry = Entry(tk, textvariable=password, show='*')
+
+##login button
+## Trả về một object đã được nén lại từ một function với các parameters tương ứng
+validateLogin = partial(validateLogin,username,password)
+loginButton = Button(tk,text="Login", padx = 50, pady = 50, command =validateLogin)
+loginError = Label(tk,text = "Đăng nhập thất bại, xin mời đăng nhập lại")
+##Packlogin form
+usernameLabel.pack()
+usernameEntry.pack()
+passwordLabel.pack()
+passwordEntry.pack()
+loginButton.pack()
+
+tk.mainloop()
